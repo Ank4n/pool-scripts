@@ -90,7 +90,7 @@ async function main() {
 	to_not_migrate = 0;
 	const member_keys = await apiAt.query.nominationPools.poolMembers.keys();
 	for (const key of member_keys) {
-		if (txs.length >= 10) {
+		if (txs.length >= 1) {
 			await batch_send(api, admin, txs);
 			console.log('Waiting for 6 seconds.');
 			// wait for 6 seconds
@@ -119,8 +119,10 @@ async function main() {
 				txs.push(do_member_migrate);
 			}
 		} else {
-			console.log(`Member ${key.toHuman()} already migrated 🎉🎉.`);
 			to_not_migrate++;
+			console.log(
+				`Member ${key.toHuman()} already migrated 🎉🎉. Total migrated: ${to_not_migrate}.`
+			);
 		}
 
 		const member_pending_slash_raw = await api.rpc.state.call(
@@ -183,12 +185,15 @@ function hexToLe(hexString: string): string {
 }
 
 async function batch_send(api: ApiPromise, signer: KeyringPair, txs: any[]) {
-	if (txs.length > 0) {
+	if (txs.length > 1) {
 		await api.tx.utility.batch(txs).signAndSend(signer, ({ status }) => {
 			if (status.isInBlock) {
 				console.log(`included in ${status.asInBlock}`);
 			}
 		});
+		console.log(`Sent ${txs.length} transactions.`);
+	} else if (txs.length == 1) {
+		await txs[0].signAndSend(signer);
 		console.log(`Sent ${txs.length} transactions.`);
 	}
 }

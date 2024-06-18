@@ -76,8 +76,6 @@ async function main() {
 			'NominationPoolsApi_member_needs_delegate_migration',
 			member_acc
 		);
-		// const should_migrate_delegation =
-		// 	await apiAt.call.nominationPoolsApi.member_needs_delegate_migration(key);
 
 		if (should_migrate_delegation) {
 			if (options.dry) {

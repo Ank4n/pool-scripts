@@ -6,6 +6,8 @@ import { ApiPromise, Keyring, WsProvider } from '@polkadot/api';
 import type { KeyringPair } from '@polkadot/keyring/types';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
+const DELAY = 10000;
+const BATCH_SIZE = 20;
 
 const optionsPromise = yargs(hideBin(process.argv))
 	.option('endpoint', {
@@ -51,11 +53,10 @@ async function main() {
 	let txs = [];
 
 	for (const key of pool_keys) {
-		if (txs.length >= 10) {
+		if (txs.length >= BATCH_SIZE) {
 			await batch_send(api, admin, txs);
-			console.log('Waiting for 6 seconds.');
-			// wait for 6 seconds
-			await new Promise((f) => setTimeout(f, 6000));
+			console.log(`Waiting for ${DELAY / 1000} seconds.`);
+			await new Promise((f) => setTimeout(f, DELAY));
 			txs = [];
 			console.log(`Cleared txns. ${txs.length}`);
 		}
@@ -90,11 +91,11 @@ async function main() {
 	to_not_migrate = 0;
 	const member_keys = await apiAt.query.nominationPools.poolMembers.keys();
 	for (const key of member_keys) {
-		if (txs.length >= 1) {
+		if (txs.length >= BATCH_SIZE) {
 			await batch_send(api, admin, txs);
-			console.log('Waiting for 6 seconds.');
+			console.log(`Waiting for ${DELAY / 1000} seconds.`);
 			// wait for 6 seconds
-			await new Promise((f) => setTimeout(f, 6000));
+			await new Promise((f) => setTimeout(f, DELAY));
 			txs = [];
 			console.log(`Cleared txns. ${txs.length}`);
 		}

@@ -3,6 +3,7 @@ import '@polkadot/api-augment';
 import '@polkadot/types-augment';
 import { u8aToHex, hexToNumber, numberToHex } from '@polkadot/util';
 import { ApiPromise, Keyring, WsProvider } from '@polkadot/api';
+import type { KeyringPair } from '@polkadot/keyring/types';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
@@ -47,11 +48,16 @@ async function main() {
 	const pool_keys = await apiAt.query.nominationPools.bondedPools.keys();
 	let to_migrate = 0;
 	let to_not_migrate = 0;
-	const txs = [];
+	let txs = [];
 
 	for (const key of pool_keys) {
 		if (txs.length >= 10) {
-			break;
+			await batch_send(api, admin, txs);
+			console.log('Waiting for 6 seconds.');
+			// wait for 6 seconds
+			await new Promise((f) => setTimeout(f, 6000));
+			txs = [];
+			console.log(`Cleared txns. ${txs.length}`);
 		}
 		// check for pool migration
 		const pool_id = api.createType('u32', key.toHuman());
@@ -85,25 +91,35 @@ async function main() {
 	const member_keys = await apiAt.query.nominationPools.poolMembers.keys();
 	for (const key of member_keys) {
 		if (txs.length >= 10) {
-			break;
+			await batch_send(api, admin, txs);
+			console.log('Waiting for 6 seconds.');
+			// wait for 6 seconds
+			await new Promise((f) => setTimeout(f, 6000));
+			txs = [];
+			console.log(`Cleared txns. ${txs.length}`);
 		}
 		// check for pool migration
 		const keyring = new Keyring();
 		const member_account = keyring.decodeAddress(key.toHuman()?.toString());
 		const member_acc_hex = u8aToHex(member_account);
-		const should_migrate_delegation = await api.rpc.state.call(
+		const result = await api.rpc.state.call(
 			'NominationPoolsApi_member_needs_delegate_migration',
 			member_acc_hex
 		);
 
+		const should_migrate_delegation = result.toHex() == '0x01';
 		if (should_migrate_delegation) {
 			to_migrate++;
+			if (to_migrate % 100 == 0) {
+				console.log(`to migrate: ${to_migrate}`);
+			}
 			if (!options.dry) {
 				console.log(`Migrating member ${key.toHuman()}.`);
 				const do_member_migrate = api.tx.nominationPools.migrateDelegation(member_account);
 				txs.push(do_member_migrate);
 			}
 		} else {
+			console.log(`Member ${key.toHuman()} already migrated 🎉🎉.`);
 			to_not_migrate++;
 		}
 
@@ -129,15 +145,6 @@ async function main() {
 
 	if (options.dry) {
 		console.log(`${to_migrate} members need delegation migration.`);
-	}
-
-	if (txs.length > 0) {
-		await api.tx.utility.batch(txs).signAndSend(admin, ({ status }) => {
-			if (status.isInBlock) {
-				console.log(`included in ${status.asInBlock}`);
-			}
-		});
-		console.log(`Sent ${txs.length} transactions.`);
 	}
 
 	process.exit(0);
@@ -173,4 +180,15 @@ function hexToLe(hexString: string): string {
 	const littleEndianHex = '0x' + reversedPairs.join('');
 
 	return padHexString(littleEndianHex);
+}
+
+async function batch_send(api: ApiPromise, signer: KeyringPair, txs: any[]) {
+	if (txs.length > 0) {
+		await api.tx.utility.batch(txs).signAndSend(signer, ({ status }) => {
+			if (status.isInBlock) {
+				console.log(`included in ${status.asInBlock}`);
+			}
+		});
+		console.log(`Sent ${txs.length} transactions.`);
+	}
 }

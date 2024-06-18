@@ -31,7 +31,11 @@ async function main() {
 	// sr25519 keyring
 	const keyring = new Keyring({ type: 'sr25519' });
 	const MNEMONIC = process.env.DOT_BOT_MNEMONIC;
-	const admin = keyring.createFromUri(`${MNEMONIC}`).address;
+	const admin = keyring.createFromUri(`${MNEMONIC}`);
+
+	console.log(
+		`${admin.meta.name}: has address ${admin.address} with publicKey [${admin.publicKey}]`
+	);
 
 	console.log(
 		`****************** Connected to node: ${(await api.rpc.system.chain()).toHuman()} [ss58: ${
@@ -41,24 +45,30 @@ async function main() {
 
 	// go over all pools.
 	const pool_keys = await apiAt.query.nominationPools.bondedPools.keys();
+	let to_migrate = 0;
+	let to_not_migrate = 0;
 	for (const key of pool_keys) {
 		// check for pool migration
-		const pool_id = hexToLe(numberToHex(api.createType('u32', key.toHuman()).toNumber()));
+		const pool_id = api.createType('u32', key.toHuman());
+		const pool_id_hex = hexToLe(numberToHex(api.createType('u32', key.toHuman()).toNumber()));
 		const result = await api.rpc.state.call(
 			'NominationPoolsApi_pool_needs_delegate_migration',
-			pool_id
+			pool_id_hex
 		);
 
 		const should_migrate = result.toHex() == '0x01';
 
 		if (should_migrate) {
-			if (options.dry) {
-				console.log(`Pool #${key.toHuman()} needs migration.`);
-			} else {
-				const do_pool_migrate = api.tx.nominationPools.migrate_pool_to_delegate_stake(key);
+			console.log(`Pool #${pool_id} needs migration.`);
+			to_migrate++;
+			if (!options.dry) {
+				const do_pool_migrate = api.tx.nominationPools.migratePoolToDelegateStake(pool_id);
 				const hash = await do_pool_migrate.signAndSend(admin);
-				console.log('do_pool_migrate completed with hash', hash.toHex());
+				console.log(`pool #${pool_id} completed with hash`, hash.toHex());
+				break;
 			}
+		} else {
+			to_not_migrate++;
 		}
 
 		// check for pool slash
@@ -66,30 +76,33 @@ async function main() {
 		// console.log(`Pool #${key.toHuman()} has pending slash of ${pool_pending_slash.toHuman()}.`);
 	}
 
+	console.log(`Pools to migrate: ${to_migrate}, Pools to not migrate: ${to_not_migrate}`);
+
 	// go over all pool members.
 	const member_keys = await apiAt.query.nominationPools.poolMembers.keys();
 	for (const key of member_keys) {
 		// check for pool migration
 		const keyring = new Keyring();
-		const member_acc = u8aToHex(keyring.decodeAddress(key.toHuman()?.toString()));
+		const member_account = keyring.decodeAddress(key.toHuman()?.toString());
+		const member_acc_hex = u8aToHex(member_account);
 		const should_migrate_delegation = await api.rpc.state.call(
 			'NominationPoolsApi_member_needs_delegate_migration',
-			member_acc
+			member_acc_hex
 		);
 
 		if (should_migrate_delegation) {
-			if (options.dry) {
-				console.log(`Member ${key.toHuman()} needs delegation migration.`);
-			} else {
-				const do_member_migrate = api.tx.nominationPools.migrate_delegation(key);
+			console.log(`Member ${key.toHuman()} needs delegation migration.`);
+			if (!options.dry) {
+				const do_member_migrate = api.tx.nominationPools.migrateDelegation(member_account);
 				const hash = await do_member_migrate.signAndSend(admin);
-				console.log('do_pool_migrate completed with hash', hash.toHex());
+				console.log(`Member ${key.toHuman()} migration submitted with hash`, hash.toHex());
+				break;
 			}
 		}
 
 		const member_pending_slash_raw = await api.rpc.state.call(
 			'NominationPoolsApi_member_pending_slash',
-			member_acc
+			member_acc_hex
 		);
 
 		const member_pending_slash = api.createType(
@@ -102,9 +115,12 @@ async function main() {
 			if (options.dry) {
 				console.log(`Member ${key.toHuman()} has pending slash of ${member_pending_slash}.`);
 			} else {
-				const do_member_slash = api.tx.nominationPools.apply_slash(key);
+				const do_member_slash = api.tx.nominationPools.applySlash(member_account);
 				const hash = await do_member_slash.signAndSend(admin);
-				console.log('do_member_slash completed with hash', hash.toHex());
+				console.log(
+					`Member ${key.toHuman()} pending slash apply submitted with hash`,
+					hash.toHex()
+				);
 			}
 		}
 	}

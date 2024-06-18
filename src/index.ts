@@ -47,7 +47,12 @@ async function main() {
 	const pool_keys = await apiAt.query.nominationPools.bondedPools.keys();
 	let to_migrate = 0;
 	let to_not_migrate = 0;
+	const txs = [];
+
 	for (const key of pool_keys) {
+		if (txs.length >= 10) {
+			break;
+		}
 		// check for pool migration
 		const pool_id = api.createType('u32', key.toHuman());
 		const pool_id_hex = hexToLe(numberToHex(api.createType('u32', key.toHuman()).toNumber()));
@@ -59,28 +64,29 @@ async function main() {
 		const should_migrate = result.toHex() == '0x01';
 
 		if (should_migrate) {
-			console.log(`Pool #${pool_id} needs migration.`);
 			to_migrate++;
 			if (!options.dry) {
+				console.log(`Migrating Pool #${pool_id}.`);
 				const do_pool_migrate = api.tx.nominationPools.migratePoolToDelegateStake(pool_id);
-				const hash = await do_pool_migrate.signAndSend(admin);
-				console.log(`pool #${pool_id} completed with hash`, hash.toHex());
-				break;
+				txs.push(do_pool_migrate);
 			}
 		} else {
 			to_not_migrate++;
 		}
-
-		// check for pool slash
-		// const pool_pending_slash = await apiAt.call.nominationPoolsApi.pool_pending_slash(key);
-		// console.log(`Pool #${key.toHuman()} has pending slash of ${pool_pending_slash.toHuman()}.`);
 	}
 
-	console.log(`Pools to migrate: ${to_migrate}, Pools to not migrate: ${to_not_migrate}`);
+	if (options.dry) {
+		console.log(`Pools to migrate: ${to_migrate}, Pools to not migrate: ${to_not_migrate}`);
+	}
 
 	// go over all pool members.
+	to_migrate = 0;
+	to_not_migrate = 0;
 	const member_keys = await apiAt.query.nominationPools.poolMembers.keys();
 	for (const key of member_keys) {
+		if (txs.length >= 10) {
+			break;
+		}
 		// check for pool migration
 		const keyring = new Keyring();
 		const member_account = keyring.decodeAddress(key.toHuman()?.toString());
@@ -91,13 +97,14 @@ async function main() {
 		);
 
 		if (should_migrate_delegation) {
-			console.log(`Member ${key.toHuman()} needs delegation migration.`);
+			to_migrate++;
 			if (!options.dry) {
+				console.log(`Migrating member ${key.toHuman()}.`);
 				const do_member_migrate = api.tx.nominationPools.migrateDelegation(member_account);
-				const hash = await do_member_migrate.signAndSend(admin);
-				console.log(`Member ${key.toHuman()} migration submitted with hash`, hash.toHex());
-				break;
+				txs.push(do_member_migrate);
 			}
+		} else {
+			to_not_migrate++;
 		}
 
 		const member_pending_slash_raw = await api.rpc.state.call(
@@ -112,17 +119,25 @@ async function main() {
 
 		const should_slash_member = member_pending_slash.gtn(0);
 		if (should_slash_member) {
-			if (options.dry) {
-				console.log(`Member ${key.toHuman()} has pending slash of ${member_pending_slash}.`);
-			} else {
+			console.log(`Member ${key.toHuman()} has pending slash of ${member_pending_slash}.`);
+			if (!options.dry) {
 				const do_member_slash = api.tx.nominationPools.applySlash(member_account);
-				const hash = await do_member_slash.signAndSend(admin);
-				console.log(
-					`Member ${key.toHuman()} pending slash apply submitted with hash`,
-					hash.toHex()
-				);
+				txs.push(do_member_slash);
 			}
 		}
+	}
+
+	if (options.dry) {
+		console.log(`${to_migrate} members need delegation migration.`);
+	}
+
+	if (txs.length > 0) {
+		await api.tx.utility.batch(txs).signAndSend(admin, ({ status }) => {
+			if (status.isInBlock) {
+				console.log(`included in ${status.asInBlock}`);
+			}
+		});
+		console.log(`Sent ${txs.length} transactions.`);
 	}
 
 	process.exit(0);

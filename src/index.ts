@@ -1,7 +1,7 @@
 // needed as of 7.x series, see CHANGELOG of the api repo.
 import '@polkadot/api-augment';
 import '@polkadot/types-augment';
-import { u8aToHex, hexToNumber } from '@polkadot/util';
+import { u8aToHex, hexToNumber, numberToHex } from '@polkadot/util';
 import { ApiPromise, Keyring, WsProvider } from '@polkadot/api';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -41,29 +41,44 @@ async function main() {
 
 	// go over all pools.
 	const pool_keys = await apiAt.query.nominationPools.bondedPools.keys();
-	// for (const key of pool_keys) {
-	// 	// check for pool migration
-	// 	const should_migrate = await api.rpc.state.call(
-	// 		'NominationPoolsApi_pool_needs_delegate_migration',
-	// 		key.toHex()
-	// 	);
-	// 	// const should_migrate = await apiAt.call.nominationPoolsApi.pool_needs_delegate_migration(key);
-	//
-	// 	if (should_migrate) {
-	// 		if (options.dry) {
-	// 			console.log(`Pool #${key.toHuman()} needs migration.`);
-	// 		} else {
-	// 			const do_pool_migrate = api.tx.nominationPools.migrate_pool_to_delegate_stake(key);
-	// 			const hash = await do_pool_migrate.signAndSend(admin);
-	// 			console.log('do_pool_migrate completed with hash', hash.toHex());
-	// 		}
-	// 	}
-	//
-	// 	// check for pool slash
-	// 	const pool_pending_slash = await apiAt.call.nominationPoolsApi.pool_pending_slash(key);
-	// 	console.log(`Pool #${key.toHuman()} has pending slash of ${pool_pending_slash.toHuman()}.`);
-	// }
+	let count_migrate = 0;
+	let count_not_migrate = 0;
+	for (const key of pool_keys) {
+		// check for pool migration
+		const pool_id = numberToHex(api.createType('u32', key.toHuman()).toNumber());
+		const padded_pool_id = hexToLe(pool_id);
+		const result = await api.rpc.state.call(
+			'NominationPoolsApi_pool_needs_delegate_migration',
+			padded_pool_id
+		);
 
+		const should_migrate = result.toHex() == '0x01';
+		if (should_migrate) {
+			count_migrate++;
+		} else {
+			count_not_migrate++;
+		}
+		console.log(
+			`Pool ${key.toHuman()} | pool_id: ${pool_id} | padded_pool_id: ${padded_pool_id} | result ${result.toHex()} | should_migrate ${should_migrate}`
+		);
+		// if (should_migrate) {
+		// 	if (options.dry) {
+		// 		console.log(`Pool #${key.toHuman()} needs migration.`);
+		// 	} else {
+		// 		const do_pool_migrate = api.tx.nominationPools.migrate_pool_to_delegate_stake(key);
+		// 		const hash = await do_pool_migrate.signAndSend(admin);
+		// 		console.log('do_pool_migrate completed with hash', hash.toHex());
+		// 	}
+		// }
+		//
+		// // check for pool slash
+		// const pool_pending_slash = await apiAt.call.nominationPoolsApi.pool_pending_slash(key);
+		// console.log(`Pool #${key.toHuman()} has pending slash of ${pool_pending_slash.toHuman()}.`);
+	}
+	console.log(
+		`Total pools: ${pool_keys.length}, migrate: ${count_migrate}, not migrate: ${count_not_migrate}`
+	);
+	/**
 	// go over all pool members.
 	const member_keys = await apiAt.query.nominationPools.poolMembers.keys();
 	for (const key of member_keys) {
@@ -108,8 +123,38 @@ async function main() {
 			}
 		}
 	}
-
+	 */
 	process.exit(0);
 }
 
 main().catch(console.error);
+
+function padHexString(hexString: string): string {
+	// Ensure the hex string is at least 8 characters long (excluding '0x')
+	while (hexString.length < 10) {
+		hexString += '0'; // Append '0' to the end
+	}
+	return hexString;
+}
+
+function hexToLe(hexString: string): string {
+	// Remove "0x" prefix if present
+	if (hexString.startsWith('0x')) {
+		hexString = hexString.slice(2);
+	}
+
+	// Split the hex string into pairs of characters
+	const pairs = hexString.match(/.{1,2}/g);
+
+	if (!pairs) {
+		throw new Error('Invalid hex string format');
+	}
+
+	// Reverse the order of the pairs
+	const reversedPairs = pairs.reverse();
+
+	// Join the reversed pairs into a new hex string
+	const littleEndianHex = '0x' + reversedPairs.join('');
+
+	return padHexString(littleEndianHex);
+}

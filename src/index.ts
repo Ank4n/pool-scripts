@@ -6,8 +6,9 @@ import { ApiPromise, Keyring, WsProvider } from '@polkadot/api';
 import type { KeyringPair } from '@polkadot/keyring/types';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
+
 const DELAY = 10000;
-const BATCH_SIZE = 20;
+const BATCH_SIZE = 5;
 
 const optionsPromise = yargs(hideBin(process.argv))
 	.option('endpoint', {
@@ -46,12 +47,15 @@ async function main() {
 		}] ******************`
 	);
 
-	// go over all pools.
-	const pool_keys = await apiAt.query.nominationPools.bondedPools.keys();
-	let to_migrate = 0;
-	let to_not_migrate = 0;
-	let txs = [];
+	// Read ED.
+	const ED = api.consts.balances.existentialDeposit.toNumber();
 
+	// go over all pools.
+	// const pool_keys = await apiAt.query.nominationPools.bondedPools.keys();
+	let toMigrate = 0;
+	let alreadyMigrated = 0;
+	let txs = [];
+	/*
 	for (const key of pool_keys) {
 		if (txs.length >= BATCH_SIZE) {
 			await batch_send(api, admin, txs);
@@ -71,26 +75,36 @@ async function main() {
 		const should_migrate = result.toHex() == '0x01';
 
 		if (should_migrate) {
-			to_migrate++;
+			toMigrate++;
 			if (!options.dry) {
 				console.log(`Migrating Pool #${pool_id}.`);
 				const do_pool_migrate = api.tx.nominationPools.migratePoolToDelegateStake(pool_id);
 				txs.push(do_pool_migrate);
 			}
 		} else {
-			to_not_migrate++;
+			alreadyMigrated++;
 		}
 	}
 
-	if (options.dry) {
-		console.log(`Pools to migrate: ${to_migrate}, Pools to not migrate: ${to_not_migrate}`);
-	}
-
+	console.log(`Pools to migrate: ${toMigrate} | already migrated: ${alreadyMigrated}`);
+*/
 	// go over all pool members.
-	to_migrate = 0;
-	to_not_migrate = 0;
+	toMigrate = 0;
+	alreadyMigrated = 0;
+	let balanceLow = 0;
+	let alreadyStaking = 0;
 	const member_keys = await apiAt.query.nominationPools.poolMembers.keys();
+	const total = member_keys.length;
+	let processing = 0;
+	const progressStep = Math.round(total / 500);
+
+	console.log(
+		`${new Date().toISOString()} :: Starting processing migration for ${total} pool members`
+	);
+
 	for (const key of member_keys) {
+		processing++;
+		// batch tx if queue is full.
 		if (txs.length >= BATCH_SIZE) {
 			await batch_send(api, admin, txs);
 			console.log(`Waiting for ${DELAY / 1000} seconds.`);
@@ -99,6 +113,22 @@ async function main() {
 			txs = [];
 			console.log(`Cleared txns. ${txs.length}`);
 		}
+		// print progress
+		if (processing % progressStep == 0) {
+			printProgress(Math.round((processing * 10000) / total) / 100);
+			// console.log(
+			// 	`${new Date().toISOString()} :: Progress: ${Math.round((processing * 100) / total)}% \n` +
+			// 		`To Migrate: ${toMigrate} | Already Migrated: ${alreadyMigrated} \n` +
+			// 		`Skipping migration because BalanceLow: ${balanceLow} | AlreadyStaking: ${alreadyStaking}`
+			// );
+		}
+
+		// check member balance
+		const { data: member_balance } = await api.query.system.account(key);
+		const is_balance_low = member_balance.free.toNumber() < ED;
+		// check if member is already staking directly.
+		const is_staking_directly = (await api.query.staking.bonded(key)).isSome;
+
 		// check for pool migration
 		const keyring = new Keyring();
 		const member_account = keyring.decodeAddress(key.toHuman()?.toString());
@@ -109,21 +139,24 @@ async function main() {
 		);
 
 		const should_migrate_delegation = result.toHex() == '0x01';
-		if (should_migrate_delegation) {
-			to_migrate++;
-			if (to_migrate % 100 == 0) {
-				console.log(`to migrate: ${to_migrate}`);
-			}
+		if (is_balance_low) {
+			balanceLow++;
+			// console.log(`Member ${key.toHuman()} balance too low. Skipping migration.`);
+		} else if (is_staking_directly) {
+			alreadyStaking++;
+			// console.log(`Member ${key.toHuman()} is already staking directly.`);
+		} else if (should_migrate_delegation) {
+			toMigrate++;
 			if (!options.dry) {
 				console.log(`Migrating member ${key.toHuman()}.`);
 				const do_member_migrate = api.tx.nominationPools.migrateDelegation(member_account);
 				txs.push(do_member_migrate);
 			}
 		} else {
-			to_not_migrate++;
-			console.log(
-				`Member ${key.toHuman()} already migrated 🎉🎉. Total migrated: ${to_not_migrate}.`
-			);
+			alreadyMigrated++;
+			// console.log(
+			// 	`Member ${key.toHuman()} already migrated 🎉🎉. Total migrated: ${alreadyMigrated}.`
+			// );
 		}
 
 		const member_pending_slash_raw = await api.rpc.state.call(
@@ -146,9 +179,10 @@ async function main() {
 		}
 	}
 
-	if (options.dry) {
-		console.log(`${to_migrate} members need delegation migration.`);
-	}
+	console.log(`${toMigrate} members need delegation migration.`);
+	console.log(`${alreadyMigrated} members already migrated.`);
+	console.log(`${alreadyStaking} members cannot be migrated since they are staking directly.`);
+	console.log(`${balanceLow} members cannot be migrated since their balance is too low.`);
 
 	process.exit(0);
 }
@@ -197,4 +231,10 @@ async function batch_send(api: ApiPromise, signer: KeyringPair, txs: any[]) {
 		await txs[0].signAndSend(signer);
 		console.log(`Sent ${txs.length} transactions.`);
 	}
+}
+
+function printProgress(progress: number) {
+	process.stdout.clearLine(0);
+	process.stdout.cursorTo(0);
+	process.stdout.write('Processed: ' + progress + '%');
 }

@@ -155,7 +155,13 @@ async function main() {
 
 		// check member balance
 		const { data: member_balance } = await api.query.system.account(member_account);
-		const is_balance_low = member_balance.free.toNumber() < minBalance;
+		let is_balance_low = false;
+		try {
+			// this can fail if balance is larger than what number can hold.
+			is_balance_low = member_balance.free.toNumber() < minBalance;
+		} catch (e) {
+			console.log(`Error while checking balance for ${key.toHuman()}.`);
+		}
 		// check if member is already staking directly.
 		const is_staking_directly = (await api.query.staking.bonded(member_account)).isSome;
 
@@ -292,9 +298,9 @@ function printProgress(additional: string, force = false) {
 		process.stdout.cursorTo(0);
 		process.stdout.write(
 			`Progress ${Math.round((processed * 10000) / totalToProcess) / 100}%` +
-				` | Processed ${processed}/${totalToProcess}` +
-				` | Stats: ${toMigrate} to migrate | ${alreadyMigrated} already migrated` +
-				` | ${additional}`
+			` | Processed ${processed}/${totalToProcess}` +
+			` | Stats: ${toMigrate} to migrate | ${alreadyMigrated} already migrated` +
+			` | ${additional}`
 		);
 	}
 }

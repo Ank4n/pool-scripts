@@ -48,7 +48,8 @@ async function main() {
 	);
 
 	// Read ED.
-	const ED = api.consts.balances.existentialDeposit.toNumber();
+	const ED = api.consts.balances.existentialDeposit;
+	console.log(`Existential Deposit: ${ED}`);
 
 	// go over all pools.
 	// const pool_keys = await apiAt.query.nominationPools.bondedPools.keys();
@@ -115,24 +116,24 @@ async function main() {
 		}
 		// print progress
 		if (processing % progressStep == 0) {
-			printProgress(Math.round((processing * 10000) / total) / 100);
-			// console.log(
-			// 	`${new Date().toISOString()} :: Progress: ${Math.round((processing * 100) / total)}% \n` +
-			// 		`To Migrate: ${toMigrate} | Already Migrated: ${alreadyMigrated} \n` +
-			// 		`Skipping migration because BalanceLow: ${balanceLow} | AlreadyStaking: ${alreadyStaking}`
-			// );
+			printProgress(
+				`>> Processed ${
+					Math.round((processing * 10000) / total) / 100
+				} %. Stats: ${toMigrate} to migrate | ${alreadyMigrated} already migrated | ${balanceLow} balance low | ${alreadyStaking} already staking directly. <<`
+			);
 		}
-
-		// check member balance
-		const { data: member_balance } = await api.query.system.account(key);
-		const is_balance_low = member_balance.free.toNumber() < ED;
-		// check if member is already staking directly.
-		const is_staking_directly = (await api.query.staking.bonded(key)).isSome;
 
 		// check for pool migration
 		const keyring = new Keyring();
 		const member_account = keyring.decodeAddress(key.toHuman()?.toString());
 		const member_acc_hex = u8aToHex(member_account);
+
+		// check member balance
+		const { data: member_balance } = await api.query.system.account(member_account);
+		const is_balance_low = member_balance.free.lt(ED);
+		// check if member is already staking directly.
+		const is_staking_directly = (await api.query.staking.bonded(member_account)).isSome;
+
 		const result = await api.rpc.state.call(
 			'NominationPoolsApi_member_needs_delegate_migration',
 			member_acc_hex
@@ -141,7 +142,6 @@ async function main() {
 		const should_migrate_delegation = result.toHex() == '0x01';
 		if (is_balance_low) {
 			balanceLow++;
-			// console.log(`Member ${key.toHuman()} balance too low. Skipping migration.`);
 		} else if (is_staking_directly) {
 			alreadyStaking++;
 			// console.log(`Member ${key.toHuman()} is already staking directly.`);
@@ -233,8 +233,8 @@ async function batch_send(api: ApiPromise, signer: KeyringPair, txs: any[]) {
 	}
 }
 
-function printProgress(progress: number) {
+function printProgress(progress: string) {
 	process.stdout.clearLine(0);
 	process.stdout.cursorTo(0);
-	process.stdout.write('Processed: ' + progress + '%');
+	process.stdout.write(progress);
 }

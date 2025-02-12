@@ -24,8 +24,6 @@ const optionsPromise = yargs(hideBin(process.argv))
 		description: 'if dry run is enabled, no transactions will be sent.'
 	}).argv;
 
-let balanceLow = 0;
-let alreadyStaking = 0;
 let toMigrate = 0;
 let alreadyMigrated = 0;
 let totalToProcess = 0;
@@ -69,7 +67,7 @@ async function main() {
 	}
 
 	// go over all pools.
-	console.log(`\n PHASE 1: Migrating pools.\n`);
+	console.log(`\nPHASE 1: Migrating pools.`);
 
 	const pool_keys = await apiAt.query.nominationPools.bondedPools.keys();
 	totalToProcess = pool_keys.length;
@@ -121,6 +119,8 @@ async function main() {
 
 	// go over all pool members.
 	console.log(`PHASE 2: Migrating pool members.`);
+	const lowBalanceAccounts = [];
+	const dualStakers = [];
 	const memberKeys = await apiAt.query.nominationPools.poolMembers.keys();
 	totalToProcess = memberKeys.length;
 
@@ -142,7 +142,7 @@ async function main() {
 			txs = [];
 		}
 		printProgress(
-			`Skipped migrations >> ${balanceLow} has low balance | ${alreadyStaking} staking directly.`
+			`Skipped migrations >> ${lowBalanceAccounts.length} has low balance | ${dualStakers.length} dual staking.`
 		);
 
 		// check for pool migration
@@ -169,9 +169,11 @@ async function main() {
 
 		const should_migrate_delegation = result.toHex() == '0x01';
 		if (is_balance_low) {
-			balanceLow++;
+			lowBalanceAccounts.push(
+				'|' + key.toHuman()?.toString() + ' | ' + member_balance.free.toString() + '|'
+			);
 		} else if (is_staking_directly) {
-			alreadyStaking++;
+			dualStakers.push(key.toHuman());
 			// console.log(`Member ${key.toHuman()} is already staking directly.`);
 		} else if (should_migrate_delegation) {
 			toMigrate++;
@@ -212,8 +214,19 @@ async function main() {
 	console.log(`\n ** Pool member migration Summary **`);
 	console.log(`${toMigrate} members need delegation migration.`);
 	console.log(`${alreadyMigrated} members already migrated.`);
-	console.log(`${alreadyStaking} members cannot be migrated since they are staking directly.`);
-	console.log(`${balanceLow} members cannot be migrated since their balance is too low.`);
+	console.log(`${dualStakers.length} members cannot be migrated since they are staking directly.`);
+	console.log(
+		`${lowBalanceAccounts.length} members cannot be migrated since their balance is too low.`
+	);
+
+	if (options.dry) {
+		// console.log(`\nList of skipped accounts who are already staking directly: \n`);
+		// console.log(dualStakers.join('\n'));
+		// console.log(`\n ************************************************** \n`);
+		console.log(`\nList of skipped accounts whose balance is too low: \n`);
+		console.log(`|Account | Balance | \n |-----|--------|`);
+		console.log(lowBalanceAccounts.join('\n'));
+	}
 
 	process.exit(0);
 }

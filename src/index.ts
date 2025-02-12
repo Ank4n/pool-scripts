@@ -7,7 +7,7 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
 const DELAY = 1000;
-const BATCH_SIZE = 1;
+const BATCH_SIZE = 10;
 
 const optionsPromise = yargs(hideBin(process.argv))
 	.option('endpoint', {
@@ -51,15 +51,9 @@ async function main() {
 	const keyring = new Keyring({ type: 'sr25519' });
 	const admin = keyring.createFromUri(`${MNEMONIC}`);
 
-	console.log(
-		`${admin.meta.name}: has address ${admin.address} with publicKey [${admin.publicKey}]`
-	);
+	console.log(`Using address ${admin.address} to migrate the pool members.`);
 
-	console.log(
-		`****************** Connected to node: ${(await api.rpc.system.chain()).toHuman()} [ss58: ${
-			api.registry.chainSS58
-		}] ******************`
-	);
+	console.log(`Connected to node: **${(await api.rpc.system.chain()).toHuman()}**`);
 
 	// Read ED.
 	const ED = api.consts.balances.existentialDeposit;
@@ -75,6 +69,8 @@ async function main() {
 	}
 
 	// go over all pools.
+	console.log(`\n PHASE 1: Migrating pools.\n`);
+
 	const pool_keys = await apiAt.query.nominationPools.bondedPools.keys();
 	totalToProcess = pool_keys.length;
 	console.log(
@@ -124,6 +120,7 @@ async function main() {
 	alreadyMigrated = 0;
 
 	// go over all pool members.
+	console.log(`PHASE 2: Migrating pool members.`);
 	const memberKeys = await apiAt.query.nominationPools.poolMembers.keys();
 	totalToProcess = memberKeys.length;
 
@@ -298,9 +295,9 @@ function printProgress(additional: string, force = false) {
 		process.stdout.cursorTo(0);
 		process.stdout.write(
 			`Progress ${Math.round((processed * 10000) / totalToProcess) / 100}%` +
-			` | Processed ${processed}/${totalToProcess}` +
-			` | Stats: ${toMigrate} to migrate | ${alreadyMigrated} already migrated` +
-			` | ${additional}`
+				` | Processed ${processed}/${totalToProcess}` +
+				` | Stats: ${toMigrate} to migrate | ${alreadyMigrated} already migrated` +
+				` | ${additional}`
 		);
 	}
 }

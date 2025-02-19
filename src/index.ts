@@ -6,8 +6,14 @@ import { ApiPromise, Keyring, WsProvider } from '@polkadot/api';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
-const DELAY = 1000;
-const BATCH_SIZE = 10;
+const DELAY = 1;
+const BATCH_SIZE = 1;
+// how many transacting accounts to use
+const ACCOUNTS_TO_USE = 24;
+// balance to top up transacting accounts. This should be atleast ED.
+// KSM ED = 333,333,333 => 0.0003
+// DOT ED = 10,000,000,000
+const TOPUP_BALANCE = 1000000000; // 0.001 KSM
 
 const optionsPromise = yargs(hideBin(process.argv))
 	.option('endpoint', {
@@ -30,10 +36,6 @@ let totalToProcess = 0;
 let processed = 0;
 // report progress every 50 iterations.
 const progressStep = 50;
-// how many transacting accounts to use
-const ACCOUNTS_TO_USE = 12;
-// balance to top up transacting accounts
-const TOPUP_BALANCE = 1000000000000;
 
 const MNEMONIC = process.env.DOT_BOT_MNEMONIC;
 
@@ -48,8 +50,13 @@ async function main() {
 	// sr25519 keyring
 	const keyring = new Keyring({ type: 'sr25519' });
 	const admin = keyring.createFromUri(`${MNEMONIC}`);
+	const { data: admin_balance } = await api.query.system.account(admin.address);
 
-	console.log(`Using address ${admin.address} to migrate the pool members.`);
+	console.log(
+		`Using address ${
+			admin.address
+		} with balance ${admin_balance.free.toNumber()} to migrate the pool members.`
+	);
 
 	console.log(`Connected to node: **${(await api.rpc.system.chain()).toHuman()}**`);
 
@@ -65,16 +72,16 @@ async function main() {
 	if (!options.dry) {
 		await topup_signers(api);
 	}
+	let txs = [];
 
 	// go over all pools.
 	console.log(`\nPHASE 1: Migrating pools.`);
-
+	/*
 	const pool_keys = await apiAt.query.nominationPools.bondedPools.keys();
 	totalToProcess = pool_keys.length;
 	console.log(
 		`\n${new Date().toISOString()} :: Starting processing migration for ${totalToProcess} pools`
 	);
-	let txs = [];
 	for (const key of pool_keys) {
 		if (txs.length >= BATCH_SIZE) {
 			await batch_send(api, txs);
@@ -106,13 +113,18 @@ async function main() {
 		}
 		processed++;
 	}
-
+*/
 	console.log(
 		`\nFinished migrating ${toMigrate} pools. Skipped ${alreadyMigrated} pools which were already migrated.\n`
 	);
 
+	// const skipBy = 550;
+	// const skipBy = 732;
+	// const skipBy = 2000; //1384
+	const skipBy = 0; //1384
+
 	// reset counters
-	totalToProcess = 0;
+	totalToProcess = skipBy;
 	processed = 0;
 	toMigrate = 0;
 	alreadyMigrated = 0;
@@ -128,7 +140,7 @@ async function main() {
 		`\n${new Date().toISOString()} :: Starting processing migration for ${totalToProcess} pool members`
 	);
 
-	for (const key of memberKeys) {
+	for (const key of memberKeys.slice(skipBy)) {
 		// batch tx if queue is full.
 		if (txs.length >= BATCH_SIZE) {
 			await batch_send(api, txs);
@@ -172,6 +184,7 @@ async function main() {
 			lowBalanceAccounts.push(
 				'|' + key.toHuman()?.toString() + ' | ' + member_balance.free.toString() + '|'
 			);
+			// console.log(`Member ${key.toHuman()} has low balance of ${member_balance.free.toString()}.`);
 		} else if (is_staking_directly) {
 			dualStakers.push(key.toHuman());
 			// console.log(`Member ${key.toHuman()} is already staking directly.`);
@@ -265,8 +278,11 @@ function hexToLe(hexString: string): string {
 
 async function batch_send(api: ApiPromise, txs: any[]) {
 	const keyring = new Keyring({ type: 'sr25519' });
-	const seed = toMigrate % ACCOUNTS_TO_USE;
+	// todo: ensure this works properly
+	const seed = (toMigrate / BATCH_SIZE) % ACCOUNTS_TO_USE;
 	const signer = keyring.addFromUri(`${MNEMONIC}//${seed}`);
+	console.log(`\n BATCH_SEND: Dispatching ${txs.length} transactions using seed ${seed}.`);
+
 	try {
 		if (txs.length > 1) {
 			await api.tx.utility.batch(txs).signAndSend(signer, ({ status }) => {
@@ -279,6 +295,7 @@ async function batch_send(api: ApiPromise, txs: any[]) {
 		}
 	} catch (error) {
 		console.error(`Error while dispatching a transaction: ${error}`);
+		topup_signers(api);
 	}
 }
 

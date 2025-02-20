@@ -7,13 +7,14 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
 const DELAY = 1;
+// Setting it to more than one will batch transactions and they have fees.
 const BATCH_SIZE = 1;
 // how many transacting accounts to use
-const ACCOUNTS_TO_USE = 24;
-// balance to top up transacting accounts. This should be atleast ED.
+const ACCOUNTS_TO_USE = 12;
+// balance to top up transacting accounts. This should be at least ED.
 // KSM ED = 333,333,333 => 0.0003
 // DOT ED = 10,000,000,000
-const TOPUP_BALANCE = 1000000000; // 0.001 KSM
+const TOPUP_BALANCE = 10000000000; // 1 DOT
 
 const optionsPromise = yargs(hideBin(process.argv))
 	.option('endpoint', {
@@ -28,6 +29,12 @@ const optionsPromise = yargs(hideBin(process.argv))
 		type: 'boolean',
 		default: true,
 		description: 'if dry run is enabled, no transactions will be sent.'
+	})
+	.option('start_from', {
+		alias: 's',
+		type: 'number',
+		default: 0,
+		description: 'Start iterating from this index.'
 	}).argv;
 
 let toMigrate = 0;
@@ -74,54 +81,7 @@ async function main() {
 	}
 	let txs = [];
 
-	// go over all pools.
-	console.log(`\nPHASE 1: Migrating pools.`);
-	/*
-	const pool_keys = await apiAt.query.nominationPools.bondedPools.keys();
-	totalToProcess = pool_keys.length;
-	console.log(
-		`\n${new Date().toISOString()} :: Starting processing migration for ${totalToProcess} pools`
-	);
-	for (const key of pool_keys) {
-		if (txs.length >= BATCH_SIZE) {
-			await batch_send(api, txs);
-			printProgress(`Waiting for ${DELAY / 1000} seconds.`, true);
-			await new Promise((f) => setTimeout(f, DELAY));
-			// clear txns.
-			txs = [];
-		}
-		printProgress(``);
-
-		// check for pool migration
-		const pool_id = api.createType('u32', key.toHuman());
-		const pool_id_hex = hexToLe(numberToHex(api.createType('u32', key.toHuman()).toNumber()));
-		const result = await api.rpc.state.call(
-			'NominationPoolsApi_pool_needs_delegate_migration',
-			pool_id_hex
-		);
-
-		const should_migrate = result.toHex() == '0x01';
-		if (should_migrate) {
-			toMigrate++;
-			if (!options.dry) {
-				printProgress(`Migrating Pool #${pool_id}.`, true);
-				const do_pool_migrate = api.tx.nominationPools.migratePoolToDelegateStake(pool_id);
-				txs.push(do_pool_migrate);
-			}
-		} else {
-			alreadyMigrated++;
-		}
-		processed++;
-	}
-*/
-	console.log(
-		`\nFinished migrating ${toMigrate} pools. Skipped ${alreadyMigrated} pools which were already migrated.\n`
-	);
-
-	// const skipBy = 550;
-	// const skipBy = 732;
-	// const skipBy = 2000; //1384
-	const skipBy = 0; //1384
+	const skipBy = options.start_from;
 
 	// reset counters
 	totalToProcess = skipBy;
@@ -131,7 +91,6 @@ async function main() {
 
 	// go over all pool members.
 	console.log(`PHASE 2: Migrating pool members.`);
-	const lowBalanceAccounts = [];
 	const dualStakers = [];
 	const memberKeys = await apiAt.query.nominationPools.poolMembers.keys();
 	totalToProcess = memberKeys.length;
@@ -153,24 +112,13 @@ async function main() {
 			// clear txns.
 			txs = [];
 		}
-		printProgress(
-			`Skipped migrations >> ${lowBalanceAccounts.length} has low balance | ${dualStakers.length} dual staking.`
-		);
+		printProgress(`Skipped migrations >> ${dualStakers.length} dual staking.`);
 
 		// check for pool migration
 		const keyring = new Keyring();
 		const member_account = keyring.decodeAddress(key.toHuman()?.toString());
 		const member_acc_hex = u8aToHex(member_account);
 
-		// check member balance
-		const { data: member_balance } = await api.query.system.account(member_account);
-		let is_balance_low = false;
-		try {
-			// this can fail if balance is larger than what number can hold.
-			is_balance_low = member_balance.free.toNumber() < minBalance;
-		} catch (e) {
-			console.log(`Error while checking balance for ${key.toHuman()}.`);
-		}
 		// check if member is already staking directly.
 		const is_staking_directly = (await api.query.staking.bonded(member_account)).isSome;
 
@@ -180,12 +128,7 @@ async function main() {
 		);
 
 		const should_migrate_delegation = result.toHex() == '0x01';
-		if (is_balance_low) {
-			lowBalanceAccounts.push(
-				'|' + key.toHuman()?.toString() + ' | ' + member_balance.free.toString() + '|'
-			);
-			// console.log(`Member ${key.toHuman()} has low balance of ${member_balance.free.toString()}.`);
-		} else if (is_staking_directly) {
+		if (is_staking_directly) {
 			dualStakers.push(key.toHuman());
 			// console.log(`Member ${key.toHuman()} is already staking directly.`);
 		} else if (should_migrate_delegation) {
@@ -197,9 +140,6 @@ async function main() {
 			}
 		} else {
 			alreadyMigrated++;
-			// console.log(
-			// 	`Member ${key.toHuman()} already migrated 🎉🎉. Total migrated: ${alreadyMigrated}.`
-			// );
 		}
 
 		const member_pending_slash_raw = await api.rpc.state.call(
@@ -228,19 +168,6 @@ async function main() {
 	console.log(`${toMigrate} members need delegation migration.`);
 	console.log(`${alreadyMigrated} members already migrated.`);
 	console.log(`${dualStakers.length} members cannot be migrated since they are staking directly.`);
-	console.log(
-		`${lowBalanceAccounts.length} members cannot be migrated since their balance is too low.`
-	);
-
-	if (options.dry) {
-		// console.log(`\nList of skipped accounts who are already staking directly: \n`);
-		// console.log(dualStakers.join('\n'));
-		// console.log(`\n ************************************************** \n`);
-		console.log(`\nList of skipped accounts whose balance is too low: \n`);
-		console.log(`|Account | Balance | \n |-----|--------|`);
-		console.log(lowBalanceAccounts.join('\n'));
-	}
-
 	process.exit(0);
 }
 
@@ -278,7 +205,6 @@ function hexToLe(hexString: string): string {
 
 async function batch_send(api: ApiPromise, txs: any[]) {
 	const keyring = new Keyring({ type: 'sr25519' });
-	// todo: ensure this works properly
 	const seed = (toMigrate / BATCH_SIZE) % ACCOUNTS_TO_USE;
 	const signer = keyring.addFromUri(`${MNEMONIC}//${seed}`);
 	console.log(`\n BATCH_SEND: Dispatching ${txs.length} transactions using seed ${seed}.`);
@@ -295,7 +221,6 @@ async function batch_send(api: ApiPromise, txs: any[]) {
 		}
 	} catch (error) {
 		console.error(`Error while dispatching a transaction: ${error}`);
-		topup_signers(api);
 	}
 }
 

@@ -13,7 +13,7 @@ found [here](https://support.polkadot.network/support/solutions/articles/6500018
 - Setup a wallet with env variable `DOT_BOT_MNEMONIC` and funds to pay for the migration fees.
 - Keep BATCH_SIZE to 1 for the transactions to be free.
 - Transfer 12+ DOTs to admin account.
-- Run the migration script: `yarn run main -e "wss://polkadot-rpc.dwellir.com -d false -s 0"`
+- Run the migration script: `yarn run main -e "wss://polkadot-rpc.dwellir.com" -d false -s 0"`
 
 ## Recommended Params
 
@@ -22,3 +22,6 @@ Westend: 12169 members, set `BATCH_SIZE` to 1 to monitor errors. Took 3.5 hours 
 Kusama has around ~3400 members. ~1 hour to migrate all members.
 
 Polkadot has around ~40000 members. Would take around 11 hours with 12 account bots. Parallelize to make it faster.
+
+## To collect
+`yarn run collect -e "wss://kusama-rpc.dwellir.com"`

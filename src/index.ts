@@ -6,15 +6,16 @@ import { ApiPromise, Keyring, WsProvider } from '@polkadot/api';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
-const DELAY = 1;
+// Delay between repeating transactions from the same account.
+const DELAY = 1000;
 // Setting it to more than one will batch transactions and they have fees.
 const BATCH_SIZE = 1;
 // how many transacting accounts to use
-const ACCOUNTS_TO_USE = 12;
+const ACCOUNTS_TO_USE = 6;
 // balance to top up transacting accounts. This should be at least ED.
 // KSM ED = 333,333,333 => 0.0003
 // DOT ED = 10,000,000,000
-const TOPUP_BALANCE = 10000000000; // 1 DOT
+const TOPUP_BALANCE = 20_000_000_000; // 2 DOT
 
 const optionsPromise = yargs(hideBin(process.argv))
 	.option('endpoint', {
@@ -35,6 +36,12 @@ const optionsPromise = yargs(hideBin(process.argv))
 		type: 'number',
 		default: 0,
 		description: 'Start iterating from this index.'
+	})
+	.option('first_seed', {
+		alias: 'f',
+		type: 'number',
+		default: 0,
+		description: 'Use this as the first seed for the transacting account.'
 	}).argv;
 
 let toMigrate = 0;
@@ -43,6 +50,7 @@ let totalToProcess = 0;
 let processed = 0;
 // report progress every 50 iterations.
 const progressStep = 50;
+let shift_seed = 0;
 
 const MNEMONIC = process.env.DOT_BOT_MNEMONIC;
 
@@ -65,7 +73,17 @@ async function main() {
 		} with balance ${admin_balance.free.toNumber()} to migrate the pool members.`
 	);
 
+	console.log(`\nParams: 
+	\nDelay: ${DELAY / 1000} seconds 
+	\nSeeding from: ${options.first_seed} 
+	\nAccounts to use: ${ACCOUNTS_TO_USE} 
+	\nStarting migration from: ${options.start_from} member index
+	\nDry run: ${options.dry}
+	\nEndpoint: ${options.endpoint}
+	\n`);
+
 	console.log(`Connected to node: **${(await api.rpc.system.chain()).toHuman()}**`);
+	shift_seed = options.first_seed;
 
 	// Read ED.
 	const ED = api.consts.balances.existentialDeposit;
@@ -84,7 +102,7 @@ async function main() {
 	const skipBy = options.start_from;
 
 	// reset counters
-	totalToProcess = skipBy;
+	totalToProcess = 0;
 	processed = 0;
 	toMigrate = 0;
 	alreadyMigrated = 0;
@@ -205,7 +223,7 @@ function hexToLe(hexString: string): string {
 
 async function batch_send(api: ApiPromise, txs: any[]) {
 	const keyring = new Keyring({ type: 'sr25519' });
-	const seed = (toMigrate / BATCH_SIZE) % ACCOUNTS_TO_USE;
+	const seed = ((toMigrate / BATCH_SIZE) % ACCOUNTS_TO_USE) + shift_seed;
 	const signer = keyring.addFromUri(`${MNEMONIC}//${seed}`);
 	console.log(`\n BATCH_SEND: Dispatching ${txs.length} transactions using seed ${seed}.`);
 
@@ -228,7 +246,7 @@ async function topup_signers(api: ApiPromise) {
 	const keyring = new Keyring({ type: 'sr25519' });
 	const admin = keyring.createFromUri(`${MNEMONIC}`);
 
-	for (let i = 0; i < ACCOUNTS_TO_USE; i++) {
+	for (let i = shift_seed; i < shift_seed + ACCOUNTS_TO_USE; i++) {
 		const signer = keyring.addFromUri(`${MNEMONIC}//${i}`);
 		const { data: signer_balance } = await api.query.system.account(signer.address);
 		const free_bal = signer_balance.free.toNumber();

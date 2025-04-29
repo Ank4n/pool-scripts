@@ -5,6 +5,8 @@
 	"main": "./build/index.js",
 	"scripts": {
 		"main": "./node_modules/.bin/ts-node ./src/index.ts",
+		"migrate:currency-fungible": "./node_modules/.bin/ts-node ./src/migrate-currency-fungible.ts",
+		"migrate:virtual-stakers": "./node_modules/.bin/ts-node ./src/migrate-virtual-stakers.ts",
 		"main:dev": "./node_modules/.bin/nodemon --exec ./node_modules/.bin/ts-node ./src/index.ts",
 		"collect": "./node_modules/.bin/ts-node src/collect-signers.ts",
 		"build": "npm run clean && ./node_modules/.bin/tsc --pretty --declaration",

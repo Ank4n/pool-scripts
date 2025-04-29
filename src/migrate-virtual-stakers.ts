@@ -7,7 +7,7 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
 // Delay between repeating transactions from the same account.
-const DELAY = 1000;
+const DELAY = 2000;
 // Setting it to more than one will batch transactions and they have fees.
 const BATCH_SIZE = 1;
 // how many transacting accounts to use
@@ -15,7 +15,8 @@ const ACCOUNTS_TO_USE = 6;
 // balance to top up transacting accounts. This should be at least ED.
 // KSM ED = 333,333,333 => 0.0003
 // DOT ED = 10,000,000,000
-const TOPUP_BALANCE = 20_000_000_000; // 2 DOT
+// Westend ED = 10,000,000,000
+const TOPUP_BALANCE = 100_000_000_000; // 0.1 Westies
 
 const optionsPromise = yargs(hideBin(process.argv))
 	.option('endpoint', {
@@ -70,14 +71,14 @@ async function main() {
 	console.log(
 		`Using address ${
 			admin.address
-		} with balance ${admin_balance.free.toNumber()} to migrate the pool members.`
+		} with balance ${admin_balance.free.toNumber()} to migrate the staking ledgers.`
 	);
 
 	console.log(`\nParams: 
 	\nDelay: ${DELAY / 1000} seconds 
 	\nSeeding from: ${options.first_seed} 
 	\nAccounts to use: ${ACCOUNTS_TO_USE} 
-	\nStarting migration from: ${options.start_from} member index
+	\nStarting migration from: ${options.start_from} virtual staker index
 	\nDry run: ${options.dry}
 	\nEndpoint: ${options.endpoint}
 	\n`);
@@ -88,15 +89,12 @@ async function main() {
 	// Read ED.
 	const ED = api.consts.balances.existentialDeposit;
 	console.log(`Existential Deposit: ${ED}`);
-	// Min join bond
-	const minJoinBond = await api.query.nominationPools.minJoinBond();
-	console.log(`Min join bond: ${minJoinBond}`);
-	const minBalance = Math.max(ED.toNumber(), minJoinBond.toNumber());
 
 	// Top up transacting accounts
 	if (!options.dry) {
 		await topup_signers(api);
 	}
+
 	let txs = [];
 
 	const skipBy = options.start_from;
@@ -107,125 +105,82 @@ async function main() {
 	toMigrate = 0;
 	alreadyMigrated = 0;
 
-	// go over all pool members.
-	console.log(`PHASE 2: Migrating pool members.`);
-	const dualStakers = [];
-	const memberKeys = await apiAt.query.nominationPools.poolMembers.keys();
-	totalToProcess = memberKeys.length;
+	// go over all stakers.
+	console.log(`Initiating migration...`);
+	const keys = await apiAt.query.staking.virtualStakers.keys();
+	totalToProcess = keys.length - skipBy;
 
 	console.log(
-		`\n${new Date().toISOString()} :: Starting processing migration for ${totalToProcess} pool members`
+		`\n${new Date().toISOString()} :: Starting processing migration for ${totalToProcess} virtual stakers`
 	);
 
-	for (const key of memberKeys.slice(skipBy)) {
+	for (const key of keys.slice(skipBy)) {
+		// print progress
+		printProgress('...', true);
+
 		// batch tx if queue is full.
 		if (txs.length >= BATCH_SIZE) {
 			await batch_send(api, txs);
-			printProgress(
-				`Dispatched ${txs.length} transactions. Waiting for ${DELAY / 1000} seconds.`,
-				true
-			);
-			// wait for 6 seconds
+			// wait...
 			await new Promise((f) => setTimeout(f, DELAY));
 			// clear txns.
 			txs = [];
 		}
-		printProgress(`Skipped migrations >> ${dualStakers.length} dual staking.`);
 
-		// check for pool migration
-		const keyring = new Keyring();
-		const member_account = keyring.decodeAddress(key.toHuman()?.toString());
-		const member_acc_hex = u8aToHex(member_account);
+		const account = keyring.decodeAddress(key.toHuman()?.toString());
+		const account_hex = u8aToHex(account);
 
-		// check if member is already staking directly.
-		const is_staking_directly = (await api.query.staking.bonded(member_account)).isSome;
+		const account_info = await api.query.system.account(account_hex);
+		const providers = account_info.providers.toNumber();
+		const consumers = account_info.consumers.toNumber();
+		const balance = account_info.data.free.toNumber();
 
-		const result = await api.rpc.state.call(
-			'NominationPoolsApi_member_needs_delegate_migration',
-			member_acc_hex
-		);
-
-		const should_migrate_delegation = result.toHex() == '0x01';
-		if (is_staking_directly) {
-			dualStakers.push(key.toHuman());
-			// console.log(`Member ${key.toHuman()} is already staking directly.`);
-		} else if (should_migrate_delegation) {
-			toMigrate++;
-			if (!options.dry) {
-				printProgress(`Migrating member ${key.toHuman()}.`, true);
-				const do_member_migrate = api.tx.nominationPools.migrateDelegation(member_account);
-				txs.push(do_member_migrate);
-			}
-		} else {
-			alreadyMigrated++;
+		if (consumers > 2) {
+			console.log(`BAD STATE: Account ${key.toHuman()} has more than 2 consumers`);
+			processed++;
+			continue;
 		}
 
-		const member_pending_slash_raw = await api.rpc.state.call(
-			'NominationPoolsApi_member_pending_slash',
-			member_acc_hex
-		);
+		let expectedProviders = 1;
+		if (balance > ED.toNumber()) {
+			expectedProviders = 2;
+		}
 
-		const member_pending_slash = api.createType(
-			'Balance',
-			hexToNumber(member_pending_slash_raw.toString())
-		);
+		if (providers > expectedProviders) {
+			console.log(
+				`BAD STATE: Account ${key.toHuman()} has ${providers} providers, which is more than expected ${expectedProviders} providers`
+			);
+			processed++;
+			continue;
+		}
 
-		const should_slash_member = member_pending_slash.gtn(0);
-		if (should_slash_member) {
-			// console.log(`Member ${key.toHuman()} has pending slash of ${member_pending_slash}.`);
+		// ensure conditions are matched before invoking the tx.
+		const needsMigration = consumers > 0 && providers === expectedProviders;
+
+		if (needsMigration) {
 			if (!options.dry) {
-				const do_member_slash = api.tx.nominationPools.applySlash(member_account);
-				txs.push(do_member_slash);
+				const migrate = api.tx.staking.migrateCurrency(account);
+				txs.push(migrate);
 			}
+			toMigrate++;
+		} else {
+			alreadyMigrated++;
 		}
 
 		processed++;
 	}
 
-	console.log(`\n ** Pool member migration Summary **`);
-	console.log(`${toMigrate} members need delegation migration.`);
-	console.log(`${alreadyMigrated} members already migrated.`);
-	console.log(`${dualStakers.length} members cannot be migrated since they are staking directly.`);
+	console.log(`Summary: to migrate: ${toMigrate} | already migrated: ${alreadyMigrated}`);
 	process.exit(0);
 }
 
 main().catch(console.error);
 
-function padHexString(hexString: string): string {
-	// Ensure the hex string is at least 8 characters long (excluding '0x')
-	while (hexString.length < 10) {
-		hexString += '0'; // Append '0' to the end
-	}
-	return hexString;
-}
-
-function hexToLe(hexString: string): string {
-	// Remove "0x" prefix if present
-	if (hexString.startsWith('0x')) {
-		hexString = hexString.slice(2);
-	}
-
-	// Split the hex string into pairs of characters
-	const pairs = hexString.match(/.{1,2}/g);
-
-	if (!pairs) {
-		throw new Error('Invalid hex string format');
-	}
-
-	// Reverse the order of the pairs
-	const reversedPairs = pairs.reverse();
-
-	// Join the reversed pairs into a new hex string
-	const littleEndianHex = '0x' + reversedPairs.join('');
-
-	return padHexString(littleEndianHex);
-}
-
 async function batch_send(api: ApiPromise, txs: any[]) {
 	const keyring = new Keyring({ type: 'sr25519' });
 	const seed = ((toMigrate / BATCH_SIZE) % ACCOUNTS_TO_USE) + shift_seed;
 	const signer = keyring.addFromUri(`${MNEMONIC}//${seed}`);
-	printProgress(`BATCH_SEND: Dispatching ${txs.length} transactions using seed ${seed}.`, true);
+	// printProgress(`Dispatching ${txs.length} transaction/s using seed ${seed}.`, true);
 
 	try {
 		if (txs.length > 1) {

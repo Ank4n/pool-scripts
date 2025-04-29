@@ -118,19 +118,6 @@ async function main() {
 		// print progress
 		printProgress('...', true);
 
-		// batch tx if queue is full.
-		if (txs.length >= BATCH_SIZE) {
-			await batch_send(api, txs);
-			// printProgress(
-			// 	`Dispatched ${txs.length} transactions. Waiting for ${DELAY / 1000} seconds.`,
-			// 	true
-			// );
-			// wait for 6 seconds
-			await new Promise((f) => setTimeout(f, DELAY));
-			// clear txns.
-			txs = [];
-		}
-
 		const account = keyring.decodeAddress(key.toHuman()?.toString());
 		const account_hex = u8aToHex(account);
 
@@ -153,6 +140,19 @@ async function main() {
 		}
 
 		processed++;
+
+		// batch tx if queue is full.
+		if (txs.length >= BATCH_SIZE) {
+			await batch_send(api, txs);
+			// printProgress(
+			// 	`Dispatched ${txs.length} transactions. Waiting for ${DELAY / 1000} seconds.`,
+			// 	true
+			// );
+			// wait for 6 seconds
+			await new Promise((f) => setTimeout(f, DELAY));
+			// clear txns.
+			txs = [];
+		}
 	}
 
 	console.log(`Summary: to migrate: ${toMigrate} | already migrated: ${alreadyMigrated}`);

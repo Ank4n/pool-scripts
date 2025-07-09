@@ -25,3 +25,11 @@ Polkadot has around ~40000 members. Would take around 11 hours with 12 account b
 
 ## To collect
 `yarn run collect -e "wss://kusama-rpc.dwellir.com"`
+
+
+## Kusama RPCs
+- wss://kusama-rpc.publicnode.com
+- wss://kusama-rpc.n.dwellir.com
+- wss://kusama-rpc-tn.dwellir.com
+- wss://ksm-rpc.stakeworld.io
+- wss://rpc-kusama.helixstreet.io

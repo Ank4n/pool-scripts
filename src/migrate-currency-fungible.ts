@@ -6,6 +6,9 @@ import { ApiPromise, Keyring, WsProvider } from '@polkadot/api';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
+/// This script migrates staking ledgers from the old staking currency to the new fungible currency.
+/// If a lock with id 'staking ' exists, it will be migrated.
+
 // Delay between repeating transactions from the same account.
 const DELAY = 2000;
 // Setting it to more than one will batch transactions and they have fees.
@@ -13,10 +16,10 @@ const BATCH_SIZE = 1;
 // how many transacting accounts to use
 const ACCOUNTS_TO_USE = 6;
 // balance to top up transacting accounts. This should be at least ED.
-// KSM ED = 333,333,333 => 0.0003
+// KSM ED = 333,333,333 => 0.0003, Top up: 0.003!
 // DOT ED = 10,000,000,000
 // Westend ED = 10,000,000,000
-const TOPUP_BALANCE = 100_000_000_000; // 0.1 Westies
+const TOPUP_BALANCE = 3_333_333_333; // 0.003 KSM
 
 const optionsPromise = yargs(hideBin(process.argv))
 	.option('endpoint', {

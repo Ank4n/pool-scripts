@@ -9,13 +9,21 @@ import { hideBin } from 'yargs/helpers';
 const DELAY = 12000;
 const ACCOUNTS_TO_USE = 32;
 
-const optionsPromise = yargs(hideBin(process.argv)).option('endpoint', {
-	alias: 'e',
-	type: 'string',
-	default: 'wss://westend-rpc.dwellir.com',
-	description: 'the wss endpoint. It must allow unsafe RPCs.',
-	demandOption: true
-}).argv;
+const optionsPromise = yargs(hideBin(process.argv))
+	.option('endpoint', {
+		alias: 'e',
+		type: 'string',
+		default: 'wss://westend-rpc.dwellir.com',
+		description: 'the wss endpoint. It must allow unsafe RPCs.',
+		demandOption: true
+	})
+	.option('dry', {
+		alias: 'd',
+		type: 'boolean',
+		default: true,
+		description:
+			'if dry run is enabled, it will just print the balances and not send any transactions.'
+	}).argv;
 
 const MNEMONIC = process.env.DOT_BOT_MNEMONIC;
 
@@ -46,13 +54,13 @@ async function main() {
 
 	console.log(`Connected to node: **${(await api.rpc.system.chain()).toHuman()}**`);
 
-	await collectSigners(api);
+	await collectSigners(api, options.dry);
 	process.exit(0);
 }
 
 main().catch(console.error);
 
-async function collectSigners(api: ApiPromise) {
+async function collectSigners(api: ApiPromise, dryRun: boolean) {
 	const keyring = new Keyring({ type: 'sr25519' });
 	const admin = keyring.createFromUri(`${MNEMONIC}`);
 
@@ -62,7 +70,7 @@ async function collectSigners(api: ApiPromise) {
 		const free_bal = signer_balance.free.toNumber();
 		console.log(`Balance for signer with seed ${i} is ${free_bal}`);
 
-		if (free_bal > 0) {
+		if (free_bal > 0 && !dryRun) {
 			await api.tx.balances.transferAll(admin.address, false).signAndSend(signer);
 			await new Promise((f) => setTimeout(f, 12000));
 			const { data: admin_balance } = await api.query.system.account(admin.address);

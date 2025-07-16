@@ -7,7 +7,7 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
 // Delay between repeating transactions from the same account.
-const DELAY = 1000;
+const DELAY = 3000;
 // Setting it to more than one will batch transactions and they have fees.
 const BATCH_SIZE = 1;
 // how many transacting accounts to use
@@ -138,7 +138,9 @@ async function main() {
 		const member_acc_hex = u8aToHex(member_account);
 
 		// check if member is already staking directly.
-		const is_staking_directly = (await api.query.staking.bonded(member_account)).isSome;
+		// const is_staking_directly = (await api.query.staking.bonded(member_account)).isSome;
+		// allow everyone to migrate.
+		const is_staking_directly = false;
 
 		const result = await api.rpc.state.call(
 			'NominationPoolsApi_member_needs_delegate_migration',
@@ -225,7 +227,16 @@ async function batch_send(api: ApiPromise, txs: any[]) {
 	const keyring = new Keyring({ type: 'sr25519' });
 	const seed = ((toMigrate / BATCH_SIZE) % ACCOUNTS_TO_USE) + shift_seed;
 	const signer = keyring.addFromUri(`${MNEMONIC}//${seed}`);
-	printProgress(`BATCH_SEND: Dispatching ${txs.length} transactions using seed ${seed}.`, true);
+	// printProgress(`BATCH_SEND: Dispatching ${txs.length} transactions using seed ${seed}.`, true);
+
+	// ensure signer has enough balance.
+	const { data: signer_balance } = await api.query.system.account(signer.address);
+	const free_bal = signer_balance.free.toNumber();
+
+	if (free_bal < TOPUP_BALANCE) {
+		console.error(`Signer ${signer.address} has insufficient balance: ${free_bal}.`);
+		return;
+	}
 
 	try {
 		if (txs.length > 1) {

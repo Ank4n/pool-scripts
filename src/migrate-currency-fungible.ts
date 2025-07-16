@@ -10,7 +10,7 @@ import { hideBin } from 'yargs/helpers';
 /// If a lock with id 'staking ' exists, it will be migrated.
 
 // Delay between repeating transactions from the same account.
-const DELAY = 2000;
+const DELAY = 3000;
 // Setting it to more than one will batch transactions and they have fees.
 const BATCH_SIZE = 1;
 // how many transacting accounts to use
@@ -19,7 +19,7 @@ const ACCOUNTS_TO_USE = 6;
 // KSM ED = 333,333,333 => 0.0003, Top up: 0.003!
 // DOT ED = 10,000,000,000
 // Westend ED = 10,000,000,000
-const TOPUP_BALANCE = 3_333_333_333; // 0.003 KSM
+const TOPUP_BALANCE = 20_000_000_000; // 2 DOT
 
 const optionsPromise = yargs(hideBin(process.argv))
 	.option('endpoint', {
@@ -169,6 +169,15 @@ async function batch_send(api: ApiPromise, txs: any[]) {
 	const seed = ((toMigrate / BATCH_SIZE) % ACCOUNTS_TO_USE) + shift_seed;
 	const signer = keyring.addFromUri(`${MNEMONIC}//${seed}`);
 	// printProgress(`Dispatching ${txs.length} transaction/s using seed ${seed}.`, true);
+
+	// ensure signer has enough balance.
+	const { data: signer_balance } = await api.query.system.account(signer.address);
+	const free_bal = signer_balance.free.toNumber();
+
+	if (free_bal < TOPUP_BALANCE) {
+		console.error(`Signer ${signer.address} has insufficient balance: ${free_bal}.`);
+		return;
+	}
 
 	try {
 		if (txs.length > 1) {

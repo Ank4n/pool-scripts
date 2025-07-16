@@ -57,6 +57,7 @@ const progressStep = 50;
 let shift_seed = 0;
 
 const MNEMONIC = process.env.DOT_BOT_MNEMONIC;
+const LAST_UNSUPPORTED_VERSION = 1005001;
 
 async function main() {
 	const options = await optionsPromise;
@@ -116,6 +117,37 @@ async function main() {
 	console.log(
 		`\n${new Date().toISOString()} :: Starting processing migration for ${totalToProcess} staking ledgers`
 	);
+
+	async function waitForRuntimeUpgrade(api: ApiPromise) {
+		let latestVersion = (await api.query.system.lastRuntimeUpgrade())
+			.unwrap()
+			.specVersion.toNumber();
+		console.log(
+			`Latest Runtime Version: ${latestVersion}, comparing with last known unsupported version ${LAST_UNSUPPORTED_VERSION}`
+		);
+
+		while (latestVersion == LAST_UNSUPPORTED_VERSION) {
+			console.log(
+				`\n${new Date().toISOString()} :: Chain not upgraded yet. Rechecking in 1 minute...`
+			);
+
+			// sleep for 1 minute
+			await new Promise((resolve) => setTimeout(resolve, 60000));
+			latestVersion = (await api.query.system.lastRuntimeUpgrade()).unwrap().specVersion.toNumber();
+		}
+
+		console.log(`Runtime upgrade to ${latestVersion} detected! Continuing...`);
+	}
+
+	await waitForRuntimeUpgrade(api);
+
+	// check if function api.tx.staking.migrateCurrency exists, else exit.
+	if (!api.tx.staking.migrateCurrency) {
+		console.error(
+			`The function api.tx.staking.migrateCurrency does not exist. Please check the runtime version.`
+		);
+		process.exit(1);
+	}
 
 	for (const key of keys.slice(skipBy)) {
 		// print progress

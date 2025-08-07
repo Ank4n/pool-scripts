@@ -19,7 +19,7 @@ const ACCOUNTS_TO_USE = 6;
 // KSM ED = 333,333,333 => 0.0003, Top up: 0.003!
 // DOT ED = 10,000,000,000
 // Westend ED = 10,000,000,000
-const TOPUP_BALANCE = 20_000_000_000; // 2 DOT
+const TOPUP_BALANCE = 18_000_000_000; // 1.8 DOT
 
 const optionsPromise = yargs(hideBin(process.argv))
 	.option('endpoint', {
@@ -206,9 +206,11 @@ async function batch_send(api: ApiPromise, txs: any[]) {
 	const { data: signer_balance } = await api.query.system.account(signer.address);
 	const free_bal = signer_balance.free.toNumber();
 
+	// If free balance is less than 1.8 DOT, don't try again. Something is wrong.
+	// Expected 2 DOT so 1.8 dot still has 0.2 DOT error margin.
 	if (free_bal < TOPUP_BALANCE) {
-		console.error(`Signer ${signer.address} has insufficient balance: ${free_bal}.`);
-		return;
+		console.error(`Signer ${signer.address} has insufficient balance: ${free_bal}. EXITING.`);
+		process.exit(1);
 	}
 
 	try {

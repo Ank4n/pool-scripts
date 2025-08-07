@@ -15,7 +15,7 @@ const ACCOUNTS_TO_USE = 6;
 // balance to top up transacting accounts. This should be at least ED.
 // KSM ED = 333,333,333 => 0.0003
 // DOT ED = 10,000,000,000
-const TOPUP_BALANCE = 20_000_000_000; // 2 DOT
+const TOPUP_BALANCE = 18_000_000_000; // 1.8 DOT
 
 const optionsPromise = yargs(hideBin(process.argv))
 	.option('endpoint', {
@@ -234,8 +234,8 @@ async function batch_send(api: ApiPromise, txs: any[]) {
 	const free_bal = signer_balance.free.toNumber();
 
 	if (free_bal < TOPUP_BALANCE) {
-		console.error(`Signer ${signer.address} has insufficient balance: ${free_bal}.`);
-		return;
+		console.error(`Signer ${signer.address} has insufficient balance: ${free_bal}. EXITING.`);
+		process.exit(1);
 	}
 
 	try {

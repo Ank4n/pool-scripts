@@ -10,16 +10,17 @@ import { hideBin } from 'yargs/helpers';
 /// If a lock with id 'staking ' exists, it will be migrated.
 
 // Delay between repeating transactions from the same account.
-const DELAY = 3000;
+const DELAY = 1000;
 // Setting it to more than one will batch transactions and they have fees.
-const BATCH_SIZE = 1;
+const BATCH_SIZE = 10;
 // how many transacting accounts to use
-const ACCOUNTS_TO_USE = 6;
+const ACCOUNTS_TO_USE = 24;
 // balance to top up transacting accounts. This should be at least ED.
 // KSM ED = 333,333,333 => 0.0003, Top up: 0.003!
 // DOT ED = 10,000,000,000
 // Westend ED = 10,000,000,000
-const TOPUP_BALANCE = 18_000_000_000; // 1.8 DOT
+// PASEO ED = 10,000,000,000
+const TOPUP_BALANCE = 20_000_000_000; // 2 Paseo
 
 const optionsPromise = yargs(hideBin(process.argv))
 	.option('endpoint', {
